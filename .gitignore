@@ -1,0 +1,8 @@
+.DS_Store
+
+# local scratch / reference material, not committed
+tmp/
+
+# never commit abuild private signing keys; only *.rsa.pub is tracked
+keys/*.rsa
+keys/PRIVATE.rsa

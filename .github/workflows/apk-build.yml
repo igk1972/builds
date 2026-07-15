@@ -140,6 +140,7 @@ jobs:
           mkdir -p /root/.abuild
           printf '%s\n' "$ABUILD_PRIVKEY" > "/root/.abuild/${KEYNAME}.rsa"
           chmod 600 "/root/.abuild/${KEYNAME}.rsa"
+          cp "$PUB" "/etc/apk/keys/${KEYNAME}.rsa.pub"   # trust our key so 'apk index' accepts signed apks
           echo "KEYNAME=$KEYNAME" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:

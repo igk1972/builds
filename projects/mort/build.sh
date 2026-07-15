@@ -71,13 +71,15 @@ buildah copy --chmod 0644 "$runtime" "$STAGE_DIR/parse.tengo" /etc/mort/parse.te
 buildah copy --chmod 0644 "$runtime" "$STAGE_DIR/mime.types"  /etc/mime.types
 buildah run "$runtime" -- /usr/local/bin/mort -version        # smoke test
 
-# 5. Config (ENV/USER/EXPOSE/ENTRYPOINT/HEALTHCHECK/labels)
+# 5. Config (ENV/USER/EXPOSE/ENTRYPOINT/labels)
+# NOTE: no HEALTHCHECK. 'buildah config --healthcheck' sets it on the working
+# container but 'buildah commit' drops it from the image (verified on buildah
+# 1.33 and 1.43). Persisting a healthcheck would require a Containerfile/buildah
+# bud, which this build deliberately avoids — define it at the orchestrator
+# (compose/k8s) or run 'mort -version' as a liveness probe instead.
 buildah config \
   --env MORT_CONFIG_DIR=/etc/mort --user mort --port 8080 --port 8081 \
   --entrypoint '["/usr/local/bin/mort"]' --cmd '' \
-  --healthcheck 'CMD ["/usr/local/bin/mort", "-version"]' \
-  --healthcheck-interval 30s --healthcheck-timeout 3s \
-  --healthcheck-start-period 5s --healthcheck-retries 3 \
   --label org.opencontainers.image.title=mort \
   --label "org.opencontainers.image.description=mort (alpine/musl, vips+brotli)" \
   --label org.opencontainers.image.source=https://github.com/igk1972/builds \

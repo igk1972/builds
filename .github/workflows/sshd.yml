@@ -1,0 +1,48 @@
+name: build-sshd
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:  { description: "Tag to publish to ghcr.io/igk1972/sshd", type: string, default: "latest" }
+      base_image: { description: "Base image (igk1972/sshd)", type: string, default: "docker.io/igk1972/sshd:9.2-alpine" }
+      push:       { description: "Push to ghcr (uncheck for a dry run)", type: boolean, default: true }
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      IMAGE: ghcr.io/igk1972/sshd
+      STORAGE_DRIVER: overlay
+      BUILDAH_ISOLATION: chroot
+      BUILDAH_FORMAT: docker
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install buildah
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y buildah fuse-overlayfs uidmap
+          buildah version
+      - name: Configure rootless storage
+        run: |
+          mkdir -p ~/.config/containers
+          cat > ~/.config/containers/storage.conf <<'EOF'
+          [storage]
+          driver = "overlay"
+          graphroot = "${HOME}/.local/share/containers/storage"
+          [storage.options.overlay]
+          mount_program = "/usr/bin/fuse-overlayfs"
+          EOF
+      - name: Log in to ghcr.io
+        run: buildah login -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}" ghcr.io
+      - name: Build & push
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          BASE_IMAGE: ${{ inputs.base_image }}
+          PUSH: ${{ inputs.push }}
+        run: |
+          chmod +x projects/sshd/build.sh
+          ./projects/sshd/build.sh

@@ -3,7 +3,7 @@ name: build-nomad
 on:
   workflow_dispatch:
     inputs:
-      alpine_image:   { type: string,  default: "alpine:3.22" }
+      alpine_image:   { type: string,  default: "alpine:edge" }   # nomad tracks edge/community (needs recent Go)
       publish_pages:  { type: boolean, default: true }
       publish_ghcr:   { type: boolean, default: true }
       release_binary: { type: boolean, default: false }   # nomad binary -> Release

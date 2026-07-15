@@ -1,0 +1,53 @@
+name: build-mort
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:        { description: "upstream aldor007/mort ref (tag/branch/sha)", type: string, default: "v0.37.0" }
+      image_tag:  { description: "Tag to publish to ghcr.io/igk1972/mort", type: string, default: "v0.37.0" }
+      also_tag_latest: { description: "Also tag :latest", type: boolean, default: true }
+      base_image: { description: "Base image (pin by digest for reproducibility)", type: string, default: "alpine:edge" }
+      push:       { description: "Push to ghcr (uncheck for a dry run)", type: boolean, default: true }
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      IMAGE: ghcr.io/igk1972/mort
+      STORAGE_DRIVER: overlay
+      BUILDAH_ISOLATION: chroot
+      BUILDAH_FORMAT: docker
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install buildah
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y buildah fuse-overlayfs uidmap
+          buildah version
+      - name: Configure rootless storage
+        run: |
+          mkdir -p ~/.config/containers
+          cat > ~/.config/containers/storage.conf <<'EOF'
+          [storage]
+          driver = "overlay"
+          graphroot = "${HOME}/.local/share/containers/storage"
+          [storage.options.overlay]
+          mount_program = "/usr/bin/fuse-overlayfs"
+          EOF
+      - name: Log in to ghcr.io
+        run: buildah login -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}" ghcr.io
+      - name: Build & push
+        env:
+          MORT_REF: ${{ inputs.ref }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          ALSO_TAG_LATEST: ${{ inputs.also_tag_latest }}
+          BASE_IMAGE: ${{ inputs.base_image }}
+          PUSH: ${{ inputs.push }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          chmod +x projects/mort/build.sh
+          ./projects/mort/build.sh

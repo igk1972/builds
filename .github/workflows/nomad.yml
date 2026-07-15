@@ -1,0 +1,26 @@
+name: build-nomad
+
+on:
+  workflow_dispatch:
+    inputs:
+      alpine_image:   { type: string,  default: "alpine:3.22" }
+      publish_pages:  { type: boolean, default: true }
+      publish_ghcr:   { type: boolean, default: true }
+      release_binary: { type: boolean, default: false }   # nomad binary -> Release
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  apk:
+    uses: ./.github/workflows/apk-build.yml
+    secrets: inherit
+    with:
+      package: nomad
+      alpine_image: ${{ inputs.alpine_image }}
+      publish_pages: ${{ inputs.publish_pages }}
+      publish_ghcr: ${{ inputs.publish_ghcr }}
+      release_binary: ${{ inputs.release_binary }}
+      binary_path: pkg/nomad/usr/sbin/nomad
+      binary_name: nomad-linux-amd64

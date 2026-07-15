@@ -1,0 +1,24 @@
+name: build-zerotier-one
+
+on:
+  workflow_dispatch:
+    inputs:
+      alpine_image:  { type: string,  default: "alpine:3.22" }
+      publish_pages: { type: boolean, default: true }
+      publish_ghcr:  { type: boolean, default: true }
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  apk:
+    uses: ./.github/workflows/apk-build.yml
+    secrets: inherit
+    with:
+      package: zerotier-one
+      alpine_image: ${{ inputs.alpine_image }}
+      publish_pages: ${{ inputs.publish_pages }}
+      publish_ghcr: ${{ inputs.publish_ghcr }}
+      # release_binary omitted (defaults to false): zerotier links openssl/libstdc++,
+      # a bare binary is not portable — install the apk instead.

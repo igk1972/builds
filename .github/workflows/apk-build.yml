@@ -1,0 +1,207 @@
+name: reusable-apk-build
+
+on:
+  workflow_call:
+    inputs:
+      package:        { type: string,  required: true }              # project name (dir under projects/)
+      alpine_image:   { type: string,  default: "alpine:3.22" }
+      publish_pages:  { type: boolean, default: true }
+      publish_ghcr:   { type: boolean, default: true }
+      release_binary: { type: boolean, default: false }
+      binary_path:    { type: string,  default: "" }                 # e.g. pkg/nomad/usr/sbin/nomad
+      binary_name:    { type: string,  default: "" }                 # e.g. nomad-linux-amd64
+    secrets:
+      ABUILD_PRIVKEY: { required: false }
+
+env:
+  GHCR_NAMESPACE: ghcr.io/igk1972
+  APK_REPO: community           # name of the published repo dir on Pages (our choice, arbitrary)
+  PAGES_BRANCH: pages
+  APK_ARTIFACT_TYPE: application/vnd.alpine.apk.package.v1
+  APK_LAYER_TYPE: application/vnd.alpine.apk.layer.v1.tar+gzip
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ inputs.alpine_image }}
+    permissions:
+      contents: read
+    steps:
+      - name: alpine-sdk & community
+        run: |
+          set -eu
+          sed -i 's|^#\(.*/community\)$|\1|' /etc/apk/repositories || true
+          grep -q '/community' /etc/apk/repositories || \
+            { m=$(grep -m1 '/main$' /etc/apk/repositories); echo "${m%/main}/community" >> /etc/apk/repositories; }
+          apk update && apk add alpine-sdk
+      - name: non-root builder
+        run: |
+          adduser -D builder; addgroup builder abuild
+          install -d -o builder -g abuild /home/builder/.abuild
+      - uses: actions/checkout@v5
+      - name: import signing key
+        env: { ABUILD_PRIVKEY: "${{ secrets.ABUILD_PRIVKEY }}" }
+        run: |
+          set -eu
+          PUB=$(ls keys/*.rsa.pub | head -n1); KEYNAME=$(basename "$PUB" .rsa.pub)
+          if [ -n "${ABUILD_PRIVKEY:-}" ]; then
+            printf '%s\n' "$ABUILD_PRIVKEY" > "/home/builder/.abuild/${KEYNAME}.rsa"
+          else
+            echo "::warning::ABUILD_PRIVKEY is not set — using an ephemeral key; existing consumers will not trust these apks."
+            su builder -c 'export HOME=/home/builder; abuild-keygen -a -n'
+            KEYNAME=$(basename "$(ls /home/builder/.abuild/*.rsa | head -n1)" .rsa)
+            cp "/home/builder/.abuild/${KEYNAME}.rsa.pub" "$PUB" || true
+          fi
+          cp "$PUB" "/home/builder/.abuild/${KEYNAME}.rsa.pub"
+          cp "$PUB" "/etc/apk/keys/${KEYNAME}.rsa.pub"
+          cat > /home/builder/.abuild/abuild.conf <<EOF
+          PACKAGER="Your Name <you@example.com>"
+          MAINTAINER="\$PACKAGER"
+          PACKAGER_PRIVKEY="/home/builder/.abuild/${KEYNAME}.rsa"
+          REPODEST="/home/builder/packages"
+          EOF
+          chmod 600 "/home/builder/.abuild/${KEYNAME}.rsa"
+          chown -R builder:abuild /home/builder/.abuild
+      - name: build ${{ inputs.package }}
+        run: |
+          set -eu
+          PKGDIR="projects/${{ inputs.package }}/alpine"     # APKBUILD lives in <project>/alpine/
+          chown -R builder:abuild "$PKGDIR"
+          su builder -c "export HOME=/home/builder; cd '$PWD/$PKGDIR' && abuild -r"
+      - name: collect apks
+        run: |
+          set -eu
+          mkdir -p out/apks
+          # abuild outputs to $REPODEST/<repo>/x86_64, where <repo> = parent dir of the APKBUILD
+          # dir (= project name); don't hardcode it — glob instead.
+          cp /home/builder/packages/*/x86_64/*.apk out/apks/
+      - name: extract binary
+        if: ${{ inputs.release_binary && inputs.binary_path != '' }}
+        run: install -Dm755 "projects/${{ inputs.package }}/alpine/${{ inputs.binary_path }}" "out/${{ inputs.binary_name }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apks-${{ inputs.package }}
+          path: out/apks/*.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.release_binary && inputs.binary_path != '' }}
+        with:
+          name: binary-${{ inputs.package }}
+          path: out/${{ inputs.binary_name }}
+          if-no-files-found: error
+
+  publish-ghcr:
+    needs: build
+    if: ${{ inputs.publish_ghcr }}
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: apks-${{ inputs.package }}
+          path: incoming
+      - uses: oras-project/setup-oras@v1
+      - run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: push apks as OCI artifacts
+        run: |
+          set -eu
+          cd incoming
+          for apk in *.apk; do
+            base=${apk%.apk}
+            ver=$(printf '%s' "$base" | grep -oE '[0-9][^-]*-r[0-9]+$')   # 1.11.1-r0
+            name=${base%-"$ver"}
+            ref="${GHCR_NAMESPACE}/${name}-apk:${ver}"
+            oras push "$ref" --artifact-type "$APK_ARTIFACT_TYPE" \
+              --annotation "org.opencontainers.image.source=https://github.com/igk1972/builds" \
+              --annotation "org.opencontainers.image.title=${name}" \
+              --annotation "org.opencontainers.image.version=${ver}" \
+              "${apk}:${APK_LAYER_TYPE}"
+            oras tag "$ref" latest
+          done
+
+  publish-pages:
+    needs: build
+    if: ${{ inputs.publish_pages }}
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ inputs.alpine_image }}
+    permissions: { contents: write }
+    concurrency: { group: apk-pages, cancel-in-progress: false }   # serialize writes to the branch
+    steps:
+      - run: apk update && apk add abuild git
+      - uses: actions/checkout@v5
+        with: { path: main }                                       # for keys/
+      - name: import signing key (for APKINDEX)
+        env: { ABUILD_PRIVKEY: "${{ secrets.ABUILD_PRIVKEY }}" }
+        run: |
+          set -eu
+          PUB=$(ls main/keys/*.rsa.pub | head -n1); KEYNAME=$(basename "$PUB" .rsa.pub)
+          mkdir -p /root/.abuild
+          printf '%s\n' "$ABUILD_PRIVKEY" > "/root/.abuild/${KEYNAME}.rsa"
+          chmod 600 "/root/.abuild/${KEYNAME}.rsa"
+          echo "KEYNAME=$KEYNAME" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: apks-${{ inputs.package }}
+          path: incoming
+      - name: merge, reindex, sign, push
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
+          set -eu
+          REPO="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$REPO" "$PAGES_BRANCH" >/dev/null 2>&1; then
+            git clone --depth 1 --branch "$PAGES_BRANCH" --single-branch "$REPO" pages
+          else
+            mkdir pages && ( cd pages && git init -q && git checkout -qb "$PAGES_BRANCH" )
+          fi
+          DEST="pages/${APK_REPO}/x86_64"; mkdir -p "$DEST"
+          # drop older versions of the same pkgname (version starts with a digit), then add new ones
+          for apk in incoming/*.apk; do
+            pkg=$(basename "$apk" | sed -E 's/-[0-9][^-]*-r[0-9]+\.apk$//')
+            rm -f "$DEST/${pkg}"-[0-9]*.apk
+          done
+          cp incoming/*.apk "$DEST"/
+          ( cd "$DEST"
+            apk index --rewrite-arch x86_64 -d "igk1972 custom builds" -o APKINDEX.tar.gz *.apk
+            abuild-sign -k "/root/.abuild/${KEYNAME}.rsa" APKINDEX.tar.gz )
+          cp main/keys/*.rsa.pub pages/
+          cat > pages/index.html <<HTML
+          <!doctype html><meta charset=utf-8><title>igk1972 apk repo</title>
+          <pre>wget -O /etc/apk/keys/${KEYNAME}.rsa.pub https://igk1972.github.io/builds/${KEYNAME}.rsa.pub
+          apk add --repository https://igk1972.github.io/builds/${APK_REPO} ${{ inputs.package }}</pre>
+          HTML
+          cd pages
+          git config user.email "you@example.com"; git config user.name "Your Name"
+          git add -A
+          git commit -q -m "apk: publish ${{ inputs.package }}" || { echo "nothing to commit"; exit 0; }
+          git push "$REPO" "HEAD:$PAGES_BRANCH"
+
+  release:
+    needs: build
+    if: ${{ inputs.release_binary && inputs.binary_path != '' }}
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ inputs.package }}
+          path: dist
+      - id: meta
+        run: |
+          set -eu
+          v=$(sed -n 's/^pkgver=//p' "projects/${{ inputs.package }}/alpine/APKBUILD")
+          r=$(sed -n 's/^pkgrel=//p' "projects/${{ inputs.package }}/alpine/APKBUILD")
+          echo "tag=${{ inputs.package }}-v${v}-r${r}" >> "$GITHUB_OUTPUT"
+          ( cd dist && sha256sum * > SHA256SUMS )
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ inputs.package }} ${{ steps.meta.outputs.tag }} (linux/amd64, musl)
+          body: |
+            Binary extracted from the Alpine apk. Linked against **musl** (Alpine) —
+            it will not run on glibc distros; use the apk repository for those.
+          files: |
+            dist/*
+          fail_on_unmatched_files: true

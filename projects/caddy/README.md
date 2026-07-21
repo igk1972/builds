@@ -1,13 +1,14 @@
 # caddy
 
 Custom builds of [Caddy](https://caddyserver.com/), published to the single package
-`ghcr.io/igk1972/caddy` as two **variants** selected by tag:
+`ghcr.io/igk1972/caddy` as three **variants** selected by tag:
 
-- **`l4`** — bundles the [caddy-l4](https://github.com/mholt/caddy-l4) layer-4 (TCP/UDP) app.
-- **`docker`** — bundles [caddy-docker-proxy](https://github.com/lucaslorentz/caddy-docker-proxy),
+- **`l4`** — adds the [caddy-l4](https://github.com/mholt/caddy-l4) layer-4 (TCP/UDP) app.
+- **`docker`** — adds [caddy-docker-proxy](https://github.com/lucaslorentz/caddy-docker-proxy),
   which generates the Caddyfile from `caddy.*` labels on Docker/Swarm services.
+- **`s3`** — no extra app; just Caddy plus the shared S3 modules below.
 
-Both variants also bundle two shared S3 modules:
+Every variant bundles two shared S3 modules:
 
 - **[`certmagic-s3`](https://github.com/igk1972/certmagic-s3)** — replaces Caddy's default
   filesystem certificate storage with an S3-backed one (ACME account, certs, challenge
@@ -25,9 +26,10 @@ on one runner without QEMU).
 ```sh
 docker run --rm ghcr.io/igk1972/caddy:l4 version
 docker run --rm ghcr.io/igk1972/caddy:docker version
+docker run --rm ghcr.io/igk1972/caddy:s3 version
 ```
 
-- Entrypoint `caddy` for both. `l4` defaults to `run` with the standard Caddyfile
+- Entrypoint `caddy` for all. `l4` and `s3` default to `run` with the standard Caddyfile
   (`/etc/caddy/Caddyfile`); `docker` defaults to `docker-proxy`. Pass any subcommand as args,
   e.g. `docker run ghcr.io/igk1972/caddy:l4 version`.
 
@@ -122,18 +124,25 @@ before TLS termination, in front of or alongside the HTTP server. See the
 [caddy-l4 docs](https://github.com/mholt/caddy-l4). The bundled `certmagic-s3` / `caddy-fs-s3`
 modules are available here too (shared S3 storage/filesystem).
 
+## The `s3` variant
+
+Plain Caddy with just the shared `certmagic-s3` / `caddy-fs-s3` modules and no extra app —
+for when you want S3-backed certificate storage and/or an S3 filesystem without `caddy-l4` or
+`caddy-docker-proxy`. Wire up the storage adapter with the same `Caddyfile` block shown above.
+
 ## Tags
 
-All tags live under `ghcr.io/igk1972/caddy`; the trailing `-l4` / `-docker` marks the variant:
+All tags live under `ghcr.io/igk1972/caddy`; the trailing `-<variant>` (`l4` / `docker` / `s3`)
+marks the variant:
 
 | Tag | What it points at |
 |---|---|
-| `l4` / `docker` | Most recent build of that variant |
-| `2.11-l4` / `2.11-docker` | Latest patch of that Caddy minor, that variant |
-| `2.11.4-l4` / `2.11.4-docker` | Specific Caddy patch version, that variant |
+| `l4` / `docker` / `s3` | Most recent build of that variant |
+| `2.11-<variant>` | Latest patch of that Caddy minor, that variant |
+| `2.11.4-<variant>` | Specific Caddy patch version, that variant |
 
-Pin to a `<major.minor>-<variant>` tag in production; the bare `l4` / `docker` tag is fine
-for sandboxes.
+Pin to a `<major.minor>-<variant>` tag in production; the bare `l4` / `docker` / `s3` tag is
+fine for sandboxes.
 
 ## Building
 
@@ -141,9 +150,9 @@ The images are assembled with **explicit buildah commands** (no Dockerfile): `bu
 cross-compiles the Caddy binary for each arch with `xcaddy`, wraps each in the matching
 `caddy:<version>` runtime, and pushes a multi-arch manifest list per variant.
 
-CI: `.github/workflows/caddy.yml` (`workflow_dispatch`; inputs `variant` (`all`/`l4`/`docker`),
-`caddy_version`, `push`).
-Locally (Linux only — buildah): `PUSH=false VARIANT=l4 ./build.sh` (or `docker`, or `all`).
+CI: `.github/workflows/caddy.yml` (`workflow_dispatch`; inputs `variant`
+(`all`/`l4`/`docker`/`s3`), `caddy_version`, `push`).
+Locally (Linux only — buildah): `PUSH=false VARIANT=l4 ./build.sh` (or `docker`, `s3`, or `all`).
 
 ## Licenses
 

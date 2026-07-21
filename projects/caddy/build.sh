@@ -24,23 +24,26 @@ export BUILDAH_ISOLATION="${BUILDAH_ISOLATION:-chroot}"
 export BUILDAH_FORMAT=docker
 
 case "$VARIANT" in
-  all)       VARIANTS="l4 docker" ;;
-  l4|docker) VARIANTS="$VARIANT" ;;
-  *) echo "unknown VARIANT: $VARIANT (want l4|docker|all)" >&2; exit 1 ;;
+  all)          VARIANTS="l4 docker s3" ;;
+  l4|docker|s3) VARIANTS="$VARIANT" ;;
+  *) echo "unknown VARIANT: $VARIANT (want l4|docker|s3|all)" >&2; exit 1 ;;
 esac
 
-# The defining module, default CMD, and description for each variant.
+# The defining module (s3 has none — only the shared S3 modules), default CMD, and
+# description for each variant.
 variant_plugin() { case "$1" in
   l4)     echo "github.com/mholt/caddy-l4" ;;
   docker) echo "github.com/lucaslorentz/caddy-docker-proxy/v2" ;;
+  s3)     echo "" ;;
 esac ; }
 variant_cmd() { case "$1" in                                  # args-only CMD (entrypoint is caddy)
-  l4)     echo '["run","--config","/etc/caddy/Caddyfile","--adapter","caddyfile"]' ;;
+  l4|s3)  echo '["run","--config","/etc/caddy/Caddyfile","--adapter","caddyfile"]' ;;
   docker) echo '["docker-proxy"]' ;;
 esac ; }
 variant_desc() { case "$1" in
   l4)     echo "Caddy with the layer-4 (caddy-l4) app + certmagic-s3 storage + caddy-fs-s3 filesystem" ;;
   docker) echo "Caddy with caddy-docker-proxy + certmagic-s3 storage + caddy-fs-s3 filesystem" ;;
+  s3)     echo "Caddy with certmagic-s3 storage + caddy-fs-s3 filesystem (no extra app)" ;;
 esac ; }
 
 DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

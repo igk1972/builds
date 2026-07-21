@@ -3,7 +3,7 @@ name: build-caddy
 on:
   workflow_dispatch:
     inputs:
-      variant:       { description: "Which variant(s) to build", type: choice, options: [all, l4, docker], default: all }
+      variant:       { description: "Which variant(s) to build", type: choice, options: [all, l4, docker, s3], default: all }
       caddy_version: { description: "Caddy version (base caddy:<v> / caddy:<v>-builder)", type: string, default: "2.11" }
       push:          { description: "Push to ghcr (uncheck for a dry run)", type: boolean, default: true }
 

@@ -1,12 +1,11 @@
-name: build-caddy-l4
+name: build-caddy
 
 on:
   workflow_dispatch:
     inputs:
-      image_tag:  { description: "Tag to publish to ghcr.io/igk1972/caddy-l4", type: string, default: "latest" }
-      base_image: { description: "Base Caddy image", type: string, default: "caddy:2-alpine" }
-      plugins:    { description: "Caddy module paths (space-separated)", type: string, default: "github.com/mholt/caddy-l4" }
-      push:       { description: "Push to ghcr (uncheck for a dry run)", type: boolean, default: true }
+      variant:       { description: "Which variant(s) to build", type: choice, options: [all, l4, docker], default: all }
+      caddy_version: { description: "Caddy version (base caddy:<v> / caddy:<v>-builder)", type: string, default: "2.11" }
+      push:          { description: "Push to ghcr (uncheck for a dry run)", type: boolean, default: true }
 
 permissions:
   contents: read
@@ -16,7 +15,7 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     env:
-      IMAGE: ghcr.io/igk1972/caddy-l4
+      IMAGE: ghcr.io/igk1972/caddy
       STORAGE_DRIVER: overlay
       BUILDAH_ISOLATION: chroot
       BUILDAH_FORMAT: docker
@@ -41,10 +40,9 @@ jobs:
         run: buildah login -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}" ghcr.io
       - name: Build & push
         env:
-          IMAGE_TAG: ${{ inputs.image_tag }}
-          BASE_IMAGE: ${{ inputs.base_image }}
-          PLUGINS: ${{ inputs.plugins }}
+          VARIANT: ${{ inputs.variant }}
+          CADDY_VERSION: ${{ inputs.caddy_version }}
           PUSH: ${{ inputs.push }}
         run: |
-          chmod +x projects/caddy-l4/build.sh
-          ./projects/caddy-l4/build.sh
+          chmod +x projects/caddy/build.sh
+          ./projects/caddy/build.sh

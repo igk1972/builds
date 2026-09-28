@@ -1,0 +1,9 @@
+# Standalone bare-binary config for ghcr.io/igk1972/git-pages: binds pages/metrics on all
+# interfaces (container default is loopback-only) and disables the caddy listener, since this
+# image doesn't bundle Caddy (pair with ghcr.io/igk1972/caddy:s3 for TLS instead).
+# Everything else (fs storage under ./data == /app/data given WORKDIR /app) keeps upstream defaults.
+
+[server]
+pages = "tcp/:3000"
+caddy = "-"
+metrics = "tcp/:3002"

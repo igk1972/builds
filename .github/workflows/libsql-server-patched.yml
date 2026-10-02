@@ -1,0 +1,102 @@
+name: build-libsql-server-patched
+
+on:
+  workflow_dispatch:
+    inputs:
+      patches_ref: { description: "igk1972/libsql-patched ref (branch, tag or full sha)", type: string, default: "main" }
+      push:        { description: "Push to ghcr (uncheck for a dry run)", type: boolean, default: true }
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/igk1972/libsql-server-patched
+  STORAGE_DRIVER: overlay
+  BUILDAH_ISOLATION: chroot
+  BUILDAH_FORMAT: docker
+
+jobs:
+  # Resolve patches_ref to one commit, so both architectures build the same sources.
+  meta:
+    runs-on: ubuntu-24.04
+    outputs:
+      patches_sha: ${{ steps.meta.outputs.patches_sha }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: meta
+        env:
+          PATCHES_REF: ${{ inputs.patches_ref }}
+        run: |
+          chmod +x projects/libsql-server-patched/build.sh
+          ./projects/libsql-server-patched/build.sh meta | tee -a "$GITHUB_OUTPUT"
+
+  # sqld compiles bundled C, so each architecture builds natively on its own runner.
+  image:
+    needs: meta
+    strategy:
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install buildah
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y buildah fuse-overlayfs uidmap
+          buildah version
+      - name: Configure rootless storage
+        run: |
+          mkdir -p ~/.config/containers
+          cat > ~/.config/containers/storage.conf <<'EOF'
+          [storage]
+          driver = "overlay"
+          graphroot = "${HOME}/.local/share/containers/storage"
+          [storage.options.overlay]
+          mount_program = "/usr/bin/fuse-overlayfs"
+          EOF
+      - name: Log in to ghcr.io
+        if: inputs.push
+        run: buildah login -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}" ghcr.io
+      - name: Build & push ${{ matrix.arch }}
+        env:
+          PATCHES_REF: ${{ needs.meta.outputs.patches_sha }}
+          PUSH: ${{ inputs.push }}
+        run: |
+          chmod +x projects/libsql-server-patched/build.sh
+          ./projects/libsql-server-patched/build.sh image
+
+  manifest:
+    needs: [meta, image]
+    if: inputs.push
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install buildah
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y buildah fuse-overlayfs uidmap
+          buildah version
+      - name: Configure rootless storage
+        run: |
+          mkdir -p ~/.config/containers
+          cat > ~/.config/containers/storage.conf <<'EOF'
+          [storage]
+          driver = "overlay"
+          graphroot = "${HOME}/.local/share/containers/storage"
+          [storage.options.overlay]
+          mount_program = "/usr/bin/fuse-overlayfs"
+          EOF
+      - name: Log in to ghcr.io
+        run: buildah login -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}" ghcr.io
+      - name: Create & push manifest list
+        env:
+          PATCHES_REF: ${{ needs.meta.outputs.patches_sha }}
+          PUSH: ${{ inputs.push }}
+        run: |
+          chmod +x projects/libsql-server-patched/build.sh
+          ./projects/libsql-server-patched/build.sh manifest
+          echo "Pushed \`${IMAGE}\`: \`${{ needs.meta.outputs.version }}\`, \`latest\`, \`${PATCHES_REF::7}\`" >> "$GITHUB_STEP_SUMMARY"

@@ -4,8 +4,8 @@ Custom build of [libsql-server](https://github.com/tursodatabase/libsql) (`sqld`
 libSQL server) with the patches kept in
 [igk1972/libsql-patched](https://github.com/igk1972/libsql-patched): upstream libsql at a pinned
 commit plus fixes for bottomless (S3 backup) snapshot uploads, configurable S3 timeouts, and fixes
-for the bundled sqlean extensions (crashes, memory safety, Unicode `text_like`). What each patch
-changes is described in that repository's
+for the bundled sqlean extensions (crashes, memory safety, Unicode `text_like`), with jemalloc and
+its heap profiler as the allocator. What each patch changes is described in that repository's
 [docs/patches.md](https://github.com/igk1972/libsql-patched/blob/main/docs/patches.md).
 
 Published as a multi-arch (amd64 + arm64) image to `ghcr.io/igk1972/libsql-server-patched`.
@@ -26,6 +26,9 @@ runner and the two images are joined into one manifest list.
   `SQLD_DB_PATH`, `SQLD_HTTP_LISTEN_ADDR`, …), which gets `--db-path`, `--http-listen-addr` and
   the gRPC flags added. A command starting with plain `sqld` runs with exactly the flags given.
 - bash is included (e.g. for a `/dev/tcp` health check); there is no curl or wget.
+- `jeprof` (from the jemalloc built into sqld) and binutils, to read sqld's heap profiles; sqld
+  is built with line tables, so profiles resolve to functions, inlined ones included, and
+  source lines.
 
 ```sh
 docker run --rm ghcr.io/igk1972/libsql-server-patched:latest /bin/sqld --version
@@ -42,6 +45,27 @@ All off unless set; values are positive integers.
 | `LIBSQL_BOTTOMLESS_S3_ATTEMPT_TIMEOUT_SECS` | no timeout per S3 request attempt |
 | `LIBSQL_BOTTOMLESS_S3_STALLED_STREAM_GRACE_SECS` | stalled-stream protection disabled |
 | `LIBSQL_BOTTOMLESS_SNAPSHOT_UPLOAD_ATTEMPTS` | 3 |
+
+### Heap profiling
+
+sqld allocates through jemalloc, its C code (SQLite) included, with jemalloc's
+`background_thread:true` built in (`MALLOC_CONF` adds to it). The profiler is built in too and
+off until sqld starts with `prof:true` in `MALLOC_CONF`:
+
+| Variable | Example | Effect |
+|---|---|---|
+| `MALLOC_CONF` | `prof:true,lg_prof_sample:17,prof_prefix:/var/lib/sqld/prof/jeprof` | sample one allocation per 2^17 bytes (128 KiB) allocated; profiles go to `<prof_prefix>.*.heap` |
+| `LIBSQL_HEAP_PROFILE_INTERVAL_SECS` | `3600` | every N seconds: write a profile (with profiling on) and log jemalloc's counters |
+
+`POST /profile/heap/dump` on the admin API writes a profile on demand and returns its path and
+the counters. Profiles are read with the `jeprof` of the image that wrote them (same `/bin/sqld`):
+
+```sh
+podman run --rm -v sqld-data:/var/lib/sqld:ro --entrypoint jeprof ghcr.io/igk1972/libsql-server-patched:<sha> \
+  --text /bin/sqld /var/lib/sqld/prof/jeprof.<time>.heap
+# growth between two profiles, by call stack
+podman run … --text --base=/var/lib/sqld/prof/jeprof.<earlier>.heap /bin/sqld /var/lib/sqld/prof/jeprof.<later>.heap
+```
 
 ## Tags
 
@@ -73,5 +97,6 @@ The built images bundle upstream software that keeps its own license:
 
 - [tursodatabase/libsql](https://github.com/tursodatabase/libsql) — MIT
 - [nalgeon/sqlean](https://github.com/nalgeon/sqlean) (bundled by libsql) — MIT
+- [jemalloc](https://github.com/jemalloc/jemalloc) (built into sqld; `jeprof`) — BSD-2-Clause
 - [tianon/gosu](https://github.com/tianon/gosu) — Apache-2.0
 - Debian bookworm base image packages — their respective licenses

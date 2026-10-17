@@ -115,6 +115,7 @@ cmd_image() {
     cargo build --locked --release -p libsql-server
     cargo build --locked --release -p bottomless-cli
     cp target/release/sqld target/release/bottomless-cli /etc/ssl/certs/ca-certificates.crt /out/
+    cp target/release/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /out/
   '
 
   # 3. gosu, installed as upstream's Dockerfile does (release binary, signature checked).
@@ -142,7 +143,11 @@ cmd_image() {
   date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   rctr="$(buildah from "$RUNTIME_IMAGE")"
   ctrs+=("$rctr")
-  buildah run "$rctr" -- sh -eu -c '
+  # binutils (addr2line, nm) for jeprof, which reads sqld's heap profiles; perl is in the base image.
+  buildah run --env DEBIAN_FRONTEND=noninteractive "$rctr" -- sh -eu -c '
+    apt-get update
+    apt-get install -y --no-install-recommends binutils
+    rm -rf /var/lib/apt/lists/*
     groupadd --system --gid 666 sqld
     useradd --system --uid 666 --gid 666 --home-dir /var/lib/sqld --create-home \
       --shell /usr/sbin/nologin sqld
@@ -153,7 +158,21 @@ cmd_image() {
   buildah copy --chmod 0644 "$rctr" "$out/ca-certificates.crt" /etc/ssl/certs/ca-certificates.crt
   buildah copy --chmod 0755 "$rctr" "$out/sqld" /bin/sqld
   buildah copy --chmod 0755 "$rctr" "$out/bottomless-cli" /bin/bottomless-cli
+  buildah copy --chmod 0755 "$rctr" "$out/jeprof" /usr/local/bin/jeprof
   buildah run "$rctr" -- /bin/sqld --version # smoke test
+  # sqld sets jemalloc's background_thread:true itself (malloc_conf), MALLOC_CONF adds to it.
+  buildah run --env MALLOC_CONF=stats_print:true "$rctr" -- sh -eu -c \
+    '/bin/sqld --version 2>&1 | grep -q "opt.background_thread: true"'
+  # Heap profiling smoke test: jemalloc profiles every allocation of `sqld --version` and dumps
+  # the profile at exit; jeprof must resolve it to demangled Rust paths, not bare addresses.
+  buildah run \
+    --env MALLOC_CONF=prof:true,prof_accum:true,lg_prof_sample:0,prof_final:true,prof_prefix:/tmp/smoke \
+    "$rctr" -- sh -eu -c '
+    /bin/sqld --version >/dev/null
+    jeprof --text --alloc_space /bin/sqld /tmp/smoke.*.heap >/tmp/smoke.txt
+    grep -q "::" /tmp/smoke.txt || { cat /tmp/smoke.txt; exit 1; }
+    rm -f /tmp/smoke.*
+  '
   buildah config \
     --port 5001 --port 8080 --volume /var/lib/sqld --workingdir /var/lib/sqld --user root \
     --entrypoint '["/usr/local/bin/docker-wrapper.sh"]' --cmd '["/bin/sqld"]' \

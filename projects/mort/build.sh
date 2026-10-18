@@ -61,7 +61,7 @@ buildah unshare -- bash -euo pipefail -c '
 # 4. Runtime
 runtime="$(buildah from "$BASE_IMAGE")"
 buildah run "$runtime" -- sh -eu -c '
-  apk add --no-cache vips brotli ca-certificates
+  apk add --no-cache vips vips-heif brotli ca-certificates
   addgroup -g 1000 mort; adduser -D -H -u 1000 -G mort mort
   mkdir -p /etc/mort; chown -R mort:mort /etc/mort
 '
@@ -70,6 +70,9 @@ buildah copy --chmod 0644 "$runtime" "$STAGE_DIR/mort.yml"    /etc/mort/mort.yml
 buildah copy --chmod 0644 "$runtime" "$STAGE_DIR/parse.tengo" /etc/mort/parse.tengo
 buildah copy --chmod 0644 "$runtime" "$STAGE_DIR/mime.types"  /etc/mime.types
 buildah run "$runtime" -- /usr/local/bin/mort -version        # smoke test
+# HEIC needs both the vips module and libheif's HEVC decoder plugin; without either
+# mort still starts and only fails on the first iPhone photo.
+buildah run "$runtime" -- sh -eu -c 'ls /usr/lib/vips-modules-*/vips-heif.so /usr/lib/libheif/libheif-libde265.so'
 
 # 5. Config (ENV/USER/EXPOSE/ENTRYPOINT/labels)
 # NOTE: no HEALTHCHECK. 'buildah config --healthcheck' sets it on the working
@@ -81,7 +84,7 @@ buildah config \
   --env MORT_CONFIG_DIR=/etc/mort --user mort --port 8080 --port 8081 \
   --entrypoint '["/usr/local/bin/mort"]' --cmd '' \
   --label org.opencontainers.image.title=mort \
-  --label "org.opencontainers.image.description=mort (alpine/musl, vips+brotli)" \
+  --label "org.opencontainers.image.description=mort (alpine/musl, vips+heif+brotli)" \
   --label org.opencontainers.image.source=https://github.com/igk1972/builds \
   --label "org.opencontainers.image.revision=${GITHUB_SHA:-local}" \
   --label "org.opencontainers.image.created=${MORT_DATE}" \

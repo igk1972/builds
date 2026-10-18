@@ -2,7 +2,8 @@
 
 Custom build of [aldor007/mort](https://github.com/aldor007/mort) — an S3-compatible
 image processing / storage server in Go. Built on Alpine (musl) against the system
-**libvips** and **brotli**, published as a container image to `ghcr.io/igk1972/mort`.
+**libvips** (with HEIC through `vips-heif`) and **brotli**, published as a container image
+to `ghcr.io/igk1972/mort`.
 
 `build.sh` assembles the image with **explicit buildah commands** (no Dockerfile):
 a builder container compiles the CGO binary, its rootfs is mounted via `buildah unshare`,

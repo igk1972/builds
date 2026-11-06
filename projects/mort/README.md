@@ -1,6 +1,7 @@
 # mort
 
-Custom build of [aldor007/mort](https://github.com/aldor007/mort) — an S3-compatible
+Custom build of [igk1972/mort](https://github.com/igk1972/mort), a fork of
+[aldor007/mort](https://github.com/aldor007/mort) — an S3-compatible
 image processing / storage server in Go. Built on Alpine (musl) against the system
 **libvips** (with HEIC through `vips-heif`) and **brotli**, published as a container image
 to `ghcr.io/igk1972/mort`.
@@ -8,7 +9,7 @@ to `ghcr.io/igk1972/mort`.
 `build.sh` assembles the image with **explicit buildah commands** (no Dockerfile):
 a builder container compiles the CGO binary, its rootfs is mounted via `buildah unshare`,
 and the binary + configs are copied into a runtime container. Source is cloned from
-upstream at the given `ref`.
+the fork (`MORT_REPO`, default `https://github.com/igk1972/mort.git`) at the given `ref`.
 
 ## Image
 

@@ -3,7 +3,7 @@ name: build-mort
 on:
   workflow_dispatch:
     inputs:
-      ref:        { description: "upstream aldor007/mort ref (tag/branch/sha)", type: string, default: "v0.37.0" }
+      ref:        { description: "igk1972/mort ref (tag/branch/sha)", type: string, default: "v0.37.0" }
       image_tag:  { description: "Tag to publish to ghcr.io/igk1972/mort", type: string, default: "v0.37.0" }
       also_tag_latest: { description: "Also tag :latest", type: boolean, default: true }
       base_image: { description: "Base image (pin by digest for reproducibility)", type: string, default: "alpine:edge" }

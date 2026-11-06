@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Assemble ghcr.io/igk1972/mort from upstream aldor007/mort using explicit buildah
+# Assemble ghcr.io/igk1972/mort from the igk1972/mort fork using explicit buildah
 # commands (NO Dockerfile / NO buildah bud). amd64 only. Rootless in CI and locally.
 set -euo pipefail
 
+MORT_REPO="${MORT_REPO:-https://github.com/igk1972/mort.git}"
 MORT_REF="${MORT_REF:-v0.37.0}"
 IMAGE="${IMAGE:-ghcr.io/igk1972/mort}"
 IMAGE_TAG="${IMAGE_TAG:-$MORT_REF}"
@@ -19,9 +20,9 @@ SRC_DIR="$(mktemp -d)/mort"; STAGE_DIR="$(mktemp -d)"
 cleanup() { buildah rm "${builder:-}" "${runtime:-}" 2>/dev/null || true; }
 trap cleanup EXIT
 
-# 1. Upstream source at pinned ref (branch/tag; fallback fetch-by-sha)
-if ! git clone --depth 1 --branch "$MORT_REF" https://github.com/aldor007/mort.git "$SRC_DIR" 2>/dev/null; then
-  git init "$SRC_DIR"; git -C "$SRC_DIR" remote add origin https://github.com/aldor007/mort.git
+# 1. Source at pinned ref (branch/tag; fallback fetch-by-sha)
+if ! git clone --depth 1 --branch "$MORT_REF" "$MORT_REPO" "$SRC_DIR" 2>/dev/null; then
+  git init "$SRC_DIR"; git -C "$SRC_DIR" remote add origin "$MORT_REPO"
   git -C "$SRC_DIR" fetch --depth 1 origin "$MORT_REF"; git -C "$SRC_DIR" checkout --detach FETCH_HEAD
 fi
 MORT_COMMIT="$(git -C "$SRC_DIR" rev-parse HEAD)"
@@ -89,7 +90,7 @@ buildah config \
   --label "org.opencontainers.image.revision=${GITHUB_SHA:-local}" \
   --label "org.opencontainers.image.created=${MORT_DATE}" \
   --label "org.opencontainers.image.version=${MORT_REF}" \
-  --label "org.opencontainers.image.url=https://github.com/aldor007/mort" \
+  --label "org.opencontainers.image.url=${MORT_REPO%.git}" \
   "$runtime"
 
 # 6. Commit + tag + push

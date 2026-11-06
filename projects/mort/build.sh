@@ -97,10 +97,10 @@ buildah config \
 PRIMARY="${IMAGE}:${IMAGE_TAG}"; SHA_TAG="${IMAGE}:sha-${MORT_COMMIT:0:12}"
 buildah commit --format docker "$runtime" "$PRIMARY"
 buildah tag "$PRIMARY" "$SHA_TAG"
-[ "$ALSO_TAG_LATEST" = "true" ] && buildah tag "$PRIMARY" "${IMAGE}:latest"
+if [ "$ALSO_TAG_LATEST" = "true" ]; then buildah tag "$PRIMARY" "${IMAGE}:latest"; fi
 if [ "$PUSH" = "true" ]; then
   buildah push "$PRIMARY"; buildah push "$SHA_TAG"
-  [ "$ALSO_TAG_LATEST" = "true" ] && buildah push "${IMAGE}:latest"
+  if [ "$ALSO_TAG_LATEST" = "true" ]; then buildah push "${IMAGE}:latest"; fi
 else
   echo ">> PUSH=false: built ${PRIMARY} locally, not pushing"
 fi
